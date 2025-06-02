@@ -18,21 +18,19 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile }: Me
     return email.substring(0, 2).toUpperCase();
   };
   
-  // RTDB timestamp is a number (milliseconds since epoch) when read, or an object placeholder before write.
-  // Assuming it's a number when rendered.
   const formattedTimestamp = typeof message.timestamp === 'number' ? 
     format(new Date(message.timestamp), 'p') 
-    : 'sending...'; // Fallback if timestamp is not yet a number
+    : 'sending...';
 
   return (
     <div
       className={cn(
-        "flex items-end gap-2 py-2 px-1",
+        "flex items-start gap-2 py-2 px-1", // Changed from items-end to items-start
         isCurrentUserMessage ? "justify-end" : "justify-start"
       )}
     >
       {!isCurrentUserMessage && (
-        <Avatar className="h-8 w-8 self-start">
+        <Avatar className="h-8 w-8"> {/* Removed self-start */}
           <AvatarImage src={senderProfile?.photoURL || undefined} />
           <AvatarFallback className="bg-muted text-muted-foreground text-xs">
             {getInitials(senderProfile?.email)}
@@ -56,7 +54,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile }: Me
         </p>
       </div>
       {isCurrentUserMessage && (
-         <Avatar className="h-8 w-8 self-start">
+         <Avatar className="h-8 w-8"> {/* Removed self-start */}
           <AvatarImage src={senderProfile?.photoURL || undefined} />
           <AvatarFallback className="bg-muted text-muted-foreground text-xs">
             {getInitials(senderProfile?.email)}
