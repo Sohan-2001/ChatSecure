@@ -1,9 +1,10 @@
+
 "use client";
 
 import type { ChatMessage, UserProfile } from "@/types";
 import { MessageItem } from "./message-item";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useEffect, useRef }_from_ "react";
+import { useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
