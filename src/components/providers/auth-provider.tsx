@@ -45,13 +45,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     if (!fbUser) return;
     const userRef = ref(db, `users/${fbUser.uid}`); // RTDB ref
     try {
-      console.log(`AuthProvider: Attempting to fetch profile for UID: ${fbUser.uid} from RTDB`);
       const snapshot = await get(userRef); // RTDB get
       if (snapshot.exists()) {
         setUser(snapshot.val() as UserProfile);
-        console.log(`AuthProvider: Profile found for UID: ${fbUser.uid} in RTDB`, snapshot.val());
       } else {
-        console.log(`AuthProvider: No profile found for UID: ${fbUser.uid} in RTDB. Creating one.`);
         const newUserProfile: UserProfile = {
           uid: fbUser.uid,
           email: fbUser.email,
@@ -60,7 +57,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         };
         await set(userRef, newUserProfile); // RTDB set
         setUser(newUserProfile);
-        console.log(`AuthProvider: Profile created for UID: ${fbUser.uid} in RTDB`, newUserProfile);
       }
     } catch (error: any) {
       console.error(`AuthProvider: Error fetching/creating user profile for UID: ${fbUser.uid} from RTDB`, error);
@@ -85,7 +81,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       } else {
         setFirebaseUser(null);
         setUser(null);
-        console.log("AuthProvider: No Firebase user authenticated.");
       }
       setLoading(false);
     });
@@ -104,19 +99,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         photoURL: userCredential.user.photoURL,
       };
       await set(ref(db, `users/${userCredential.user.uid}`), newUserProfile); // RTDB set
-      console.log("AuthProvider: Signup successful, profile created in RTDB.");
     }
   };
 
   const logIn = async (data: LoginFormInputs) => {
     const { email, password } = data;
     await signInWithEmailAndPassword(auth, email, password);
-    console.log("AuthProvider: Login successful.");
   };
 
   const logOut = async () => {
     await firebaseSignOut(auth);
-    console.log("AuthProvider: Logout successful.");
   };
 
   const sendPasswordResetEmail = async (email: string) => {
@@ -133,8 +125,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       } finally {
         setLoading(false);
       }
-    } else {
-      console.log("AuthProvider: Cannot retry profile fetch, no Firebase user authenticated.");
     }
   };
   
@@ -142,3 +132,4 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
+

@@ -28,7 +28,6 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
   useEffect(() => {
     if (!currentUser) return;
 
-    console.log('UserSearchAndList: Current user:', currentUser);
     setLoading(true);
     const usersRef = ref(db, 'users');
     // Query users, order by email. Current user will be filtered out client-side.
@@ -41,11 +40,9 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
           .map(key => ({ ...usersDataObj[key], uid: key } as UserProfile)) // Ensure uid is part of the object
           .filter(userToList => userToList.uid !== currentUser.uid); // Filter out current user
         
-        console.log('UserSearchAndList: Fetched and filtered users data from RTDB:', usersData);
         setAllUsers(usersData);
       } else {
         setAllUsers([]);
-        console.log('UserSearchAndList: No users found in RTDB.');
       }
       setLoading(false);
     }, (error) => {
@@ -62,8 +59,6 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
       user.email?.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [searchTerm, allUsers]);
-
-  console.log('UserSearchAndList: Filtered users for display:', filteredUsers);
 
   const getInitials = (email?: string | null) => {
     if (!email) return 'U';
@@ -154,3 +149,4 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
     </div>
   );
 }
+
