@@ -26,7 +26,7 @@ import { MoreHorizontal, Trash2, Edit3, Save, XCircle, Loader2 } from "lucide-re
 import { format } from 'date-fns';
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import NextImage from "next/image"; // Renamed to avoid conflict
+import NextImage from "next/image";
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -66,7 +66,6 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
       setIsEditing(false);
       return;
     }
-    // Allow empty text if there's an image, otherwise text is required.
     if (!editedText.trim() && !message.imageUrl) {
       toast({ variant: "destructive", title: "Error", description: "Message text cannot be empty." });
       return;
@@ -94,7 +93,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
     }
   };
 
-  const canEdit = message.text || !message.imageUrl; // Can edit if there's text, or if it's not an image-only message that became textless
+  const canEdit = message.text || !message.imageUrl;
 
   return (
     <div
@@ -175,10 +174,12 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
                   <NextImage
                     src={message.imageUrl}
                     alt="Sent image"
-                    layout="fill"
-                    objectFit="contain"
+                    fill
+                    style={{ objectFit: 'contain' }}
                     className="bg-muted"
                     data-ai-hint="chat image"
+                    unoptimized={message.imageUrl.endsWith('.gif')} // Example for unoptimized, adjust if needed
+                    priority={false} // Consider if images are critical for LCP
                   />
                 </div>
               )}
@@ -231,3 +232,5 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
     </div>
   );
 }
+
+    
