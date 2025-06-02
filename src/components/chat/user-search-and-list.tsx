@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
@@ -27,17 +28,20 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
   useEffect(() => {
     if (!currentUser) return;
 
+    console.log('UserSearchAndList: Current user:', currentUser);
     setLoading(true);
     const usersCol = collection(db, 'users');
     // Fetch all users except the current user, order by email
     const q = query(usersCol, where('uid', '!=', currentUser.uid), orderBy('email'));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log('UserSearchAndList: Snapshot received, docs count:', snapshot.docs.length);
       const usersData = snapshot.docs.map(doc => doc.data() as UserProfile);
+      console.log('UserSearchAndList: Fetched users data:', usersData);
       setAllUsers(usersData);
       setLoading(false);
     }, (error) => {
-      console.error("Error fetching users:", error);
+      console.error("UserSearchAndList: Error fetching users:", error);
       setLoading(false);
     });
 
@@ -50,6 +54,8 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
       user.email?.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [searchTerm, allUsers]);
+
+  console.log('UserSearchAndList: Filtered users for display:', filteredUsers);
 
   const getInitials = (email?: string | null) => {
     if (!email) return 'U';
