@@ -110,7 +110,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
           </AvatarFallback>
         </Avatar>
       )}
-      <div className="flex items-end gap-1">
+      <div className="flex items-start gap-1"> {/* Changed from items-end */}
         {isCurrentUserMessage && !isEditing && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -170,16 +170,18 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
           ) : (
             <>
               {message.imageUrl && (
-                <div className="relative aspect-video max-w-xs h-auto rounded-md overflow-hidden mb-1">
+                <div className="relative w-full max-w-md rounded-md overflow-hidden my-1">
                   <NextImage
-                    src={message.imageUrl} // This will now be a Base64 Data URL
+                    src={message.imageUrl}
                     alt="Sent image"
-                    fill
-                    style={{ objectFit: 'contain' }}
-                    className="bg-muted"
+                    width={0} 
+                    height={0}
+                    sizes="100vw"
+                    style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
+                    className="bg-muted rounded-md"
                     data-ai-hint="chat image"
-                    unoptimized={true} // Important for Data URLs
-                    priority={false}
+                    unoptimized={true}
+                    priority={false} 
                   />
                 </div>
               )}
