@@ -201,8 +201,8 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
           className={cn(
             "max-w-[70%] rounded-xl px-3 py-2 shadow-md min-w-[80px]",
             isCurrentUserMessage
-              ? "rounded-br-none bg-primary text-primary-foreground"
-              : "rounded-bl-none bg-card text-card-foreground border"
+              ? "rounded-br-none bg-blue-500 text-white"
+              : "rounded-bl-none bg-gray-200 text-card-foreground border"
           )}
         >
           {isEditing && canEdit ? (
@@ -210,7 +210,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
               <Textarea
                 value={editedText}
                 onChange={(e) => setEditedText(e.target.value)}
-                className="text-sm bg-background/10 text-primary-foreground focus-visible:ring-primary-foreground placeholder-primary-foreground/70"
+                className="text-sm bg-background/10 text-white focus-visible:ring-white placeholder-white/70"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -223,10 +223,10 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
                 }}
               />
               <div className="flex justify-end gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)} disabled={isProcessingEdit} className="text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground h-auto px-2 py-1">
+                <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)} disabled={isProcessingEdit} className="text-white hover:bg-white/10 hover:text-white h-auto px-2 py-1">
                   <XCircle className="h-4 w-4 mr-1" /> Cancel
                 </Button>
-                <Button variant="default" size="sm" onClick={handleSaveEdit} disabled={isProcessingEdit || (!editedText.trim() && !message.imageUrl) || editedText.trim() === (message.text || "")} className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 h-auto px-2 py-1">
+                <Button variant="default" size="sm" onClick={handleSaveEdit} disabled={isProcessingEdit || (!editedText.trim() && !message.imageUrl) || editedText.trim() === (message.text || "")} className="bg-white text-blue-500 hover:bg-gray-200 h-auto px-2 py-1">
                   {isProcessingEdit ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />} Save
                 </Button>
               </div>
@@ -234,7 +234,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
           ) : (
             <>
               {message.imageUrl && (
-                <div className="relative w-full max-w-md rounded-md overflow-hidden my-1">
+                <div className="relative w-full max-w-md rounded-md overflow-hidden mb-1">
                   <NextImage
                     src={message.imageUrl}
                     alt="Sent image"
@@ -249,17 +249,17 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
                   />
                 </div>
               )}
-              {message.text && <p className="text-sm break-words whitespace-pre-wrap">{message.text}</p>}
-              <div className="flex items-center justify-end mt-1">
+              {message.text && <p className="text-sm break-words whitespace-pre-wrap mb-1">{message.text}</p>}
+              <div className="flex items-center justify-end">
                 {message.isEdited && (
                   <span className={cn(
                     "text-xs mr-1",
-                    isCurrentUserMessage ? "text-primary-foreground/70" : "text-muted-foreground/80"
+                    isCurrentUserMessage ? "text-white/70" : "text-muted-foreground/80"
                   )}>(edited {formattedEditedAt && `at ${formattedEditedAt}`})</span>
                 )}
                 <p className={cn(
                   "text-xs",
-                  isCurrentUserMessage ? "text-primary-foreground/70" : "text-muted-foreground"
+                  isCurrentUserMessage ? "text-white/70" : "text-muted-foreground"
                 )}>
                   {formattedTimestamp}
                 </p>
