@@ -22,23 +22,23 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MoreHorizontal, Trash2, Edit3, Save, XCircle, Loader2, MessageSquareX } from "lucide-react";
+import { MoreHorizontal, Trash2, Edit3, Save, XCircle, Loader2, MessageSquareX, Copy } from "lucide-react";
 import { format } from 'date-fns';
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import NextImage from "next/image";
-import { useAuth } from "@/hooks/use-auth"; // Import useAuth
+import { useAuth } from "@/hooks/use-auth";
 
 interface MessageItemProps {
   message: ChatMessage;
-  isCurrentUserMessage: boolean; // Still useful to determine initial alignment and sender avatar
-  senderProfile?: { email: string | null, photoURL?: string | null }; // This is the profile of who sent the message
+  isCurrentUserMessage: boolean;
+  senderProfile?: { email: string | null, photoURL?: string | null };
   onDelete: (messageId: string) => Promise<void>;
   onEdit: (messageId: string, newText: string) => Promise<void>;
 }
 
 export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDelete, onEdit }: MessageItemProps) {
-  const { user: currentUser } = useAuth(); // Get current authenticated user
+  const { user: currentUser } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(message.text || "");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -95,10 +95,33 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
     }
   };
 
-  // Current user is the one viewing the message.
-  // message.senderId is the ID of the user who sent the message.
+  const handleCopyMessage = async () => {
+    if (!message.text) {
+      toast({
+        variant: "destructive",
+        title: "Nothing to Copy",
+        description: "This message does not contain any text.",
+      });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(message.text);
+      toast({
+        title: "Copied!",
+        description: "Message text copied to clipboard.",
+      });
+    } catch (err) {
+      console.error('Failed to copy message: ', err);
+      toast({
+        variant: "destructive",
+        title: "Copy Failed",
+        description: "Could not copy message to clipboard.",
+      });
+    }
+  };
+
   const isSenderViewingOwnMessage = currentUser?.uid === message.senderId;
-  const canEdit = isSenderViewingOwnMessage && (message.text || !message.imageUrl);
+  const canEdit = isSenderViewingOwnMessage && (message.text || !message.imageUrl); // Can edit if sender and there's text, or if it's an image-only message (to add text)
 
   if (message.deletedFor && message.deletedFor[currentUser?.uid || '']) {
     return (
@@ -109,7 +132,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
         )}
       >
         {!isCurrentUserMessage && (
-          <Avatar className="h-8 w-8 invisible"> {/* Keep space for alignment */}
+          <Avatar className="h-8 w-8 invisible">
              <AvatarFallback></AvatarFallback>
           </Avatar>
         )}
@@ -121,7 +144,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
             You deleted this message.
           </div>
         {isCurrentUserMessage && (
-           <Avatar className="h-8 w-8 invisible"> {/* Keep space for alignment */}
+           <Avatar className="h-8 w-8 invisible">
              <AvatarFallback></AvatarFallback>
           </Avatar>
         )}
@@ -146,7 +169,6 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
         </Avatar>
       )}
       <div className="flex items-start gap-1">
-        {/* Show dropdown for all messages if not editing */}
         {!isEditing && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -155,7 +177,13 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align={isCurrentUserMessage ? "end" : "start"}>
-              {canEdit && ( // Edit option only for sender
+              {message.text && (
+                <DropdownMenuItem onClick={handleCopyMessage}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy Text
+                </DropdownMenuItem>
+              )}
+              {canEdit && (
                 <DropdownMenuItem onClick={() => { setIsEditing(true); setEditedText(message.text || ""); }}>
                   <Edit3 className="mr-2 h-4 w-4" />
                   Edit Text
@@ -177,7 +205,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
               : "rounded-bl-none bg-card text-card-foreground border"
           )}
         >
-          {isEditing && canEdit ? ( // Ensure only sender can see edit UI
+          {isEditing && canEdit ? (
             <div className="space-y-2">
               <Textarea
                 value={editedText}
@@ -216,8 +244,8 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
                     style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
                     className="bg-muted rounded-md"
                     data-ai-hint="chat image"
-                    unoptimized={true}
-                    priority={false}
+                    unoptimized={true} 
+                    priority={false} 
                   />
                 </div>
               )}
