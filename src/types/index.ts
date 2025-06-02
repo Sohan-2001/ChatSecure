@@ -14,8 +14,9 @@ export interface ChatMessage {
   id: string;
   senderId: string;
   senderEmail: string;
-  text: string;
-  timestamp: number | object; // RTDB serverTimestamp is an object placeholder, resolves to number (ms since epoch)
+  text?: string; // Text is now optional
+  imageUrl?: string; // To store the URL of the sent image
+  timestamp: number | object;
   isEdited?: boolean;
   editedAt?: number | object;
 }
@@ -24,6 +25,6 @@ export interface ChatRoom {
   id: string;
   participants: string[];
   participantEmails: string[];
-  lastMessage?: ChatMessage; // Timestamp within lastMessage will also be a number when read
-  updatedAt: number | object; // RTDB serverTimestamp, resolves to number
+  lastMessage?: ChatMessage; 
+  updatedAt: number | object;
 }

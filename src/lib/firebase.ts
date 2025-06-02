@@ -2,6 +2,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getDatabase, Database } from 'firebase/database';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -30,21 +31,18 @@ if (!firebaseConfig.projectId) {
 }
 
 if (firebaseConfig.databaseURL) {
-  // If databaseURL is provided, validate its format
   if (!firebaseConfig.databaseURL.startsWith('https://') || !firebaseConfig.databaseURL.endsWith('.firebaseio.com')) {
     console.error(
-      `CRITICAL FIREBASE CONFIG ERROR: The provided Firebase Database URL (NEXT_PUBLIC_FIREBASE_DATABASE_URL: "${firebaseConfig.databaseURL}") is malformed. It must start with "https://"" and end with ".firebaseio.com". Please correct it in your .env file and restart the server.`
+      `CRITICAL FIREBASE CONFIG ERROR: The provided Firebase Database URL (NEXT_PUBLIC_FIREBASE_DATABASE_URL: "${firebaseConfig.databaseURL}") is malformed. It must start with "https://" and end with ".firebaseio.com". Please correct it in your .env file and restart the server.`
     );
     criticalConfigError = true;
   }
 } else if (firebaseConfig.projectId) {
-  // If databaseURL is NOT provided, try to construct it from projectId
   firebaseConfig.databaseURL = `https://${firebaseConfig.projectId}-default-rtdb.firebaseio.com`;
   console.warn(
     `Firebase Database URL (NEXT_PUBLIC_FIREBASE_DATABASE_URL) was not explicitly set. Defaulting to: "${firebaseConfig.databaseURL}" based on your project ID. For best results, explicitly set NEXT_PUBLIC_FIREBASE_DATABASE_URL in your .env file.`
   );
 } else {
-  // If databaseURL is NOT provided AND projectId is also missing
   console.error(
     "CRITICAL FIREBASE CONFIG ERROR: Firebase Database URL (NEXT_PUBLIC_FIREBASE_DATABASE_URL) is missing, and Firebase Project ID (NEXT_PUBLIC_FIREBASE_PROJECT_ID) is also missing, so a default URL cannot be constructed. Please set at least NEXT_PUBLIC_FIREBASE_PROJECT_ID (and preferably NEXT_PUBLIC_FIREBASE_DATABASE_URL) in your .env file and restart the server."
   );
@@ -55,19 +53,17 @@ if (firebaseConfig.databaseURL) {
 let app: FirebaseApp;
 let auth: Auth;
 let db: Database;
+let storage: FirebaseStorage;
 
-// Initialize Firebase App
 if (!getApps().length) {
   app = initializeApp(firebaseConfig);
 } else {
   app = getApps()[0];
 }
 
-// Initialize Auth and Database
-// These will likely throw errors if criticalConfigError is true and config is bad,
-// which is desired behavior as the app cannot function.
 auth = getAuth(app);
 db = getDatabase(app);
+storage = getStorage(app);
 
 
-export { app, auth, db };
+export { app, auth, db, storage };

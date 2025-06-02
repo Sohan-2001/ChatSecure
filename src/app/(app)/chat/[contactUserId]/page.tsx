@@ -4,7 +4,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase'; // Import storage
 import {
   ref,
   query,
@@ -15,9 +15,13 @@ import {
   get,
   set,
   update,
-  remove, // For deleting messages
-  // limitToLast // for message fetching, if needed later
-} from 'firebase/database'; // RTDB imports
+  remove,
+} from 'firebase/database';
+import { 
+  ref as storageRef, 
+  uploadBytes, 
+  getDownloadURL 
+} from 'firebase/storage'; // Firebase Storage imports
 import type { ChatMessage, UserProfile, ChatRoom } from '@/types';
 import { moderateMessage } from "@/ai/flows/moderate-message";
 
@@ -45,13 +49,12 @@ export default function ConversationPage() {
     return [uid1, uid2].sort().join('_');
   }, []);
 
-  // Fetch contact user profile
   useEffect(() => {
     if (!contactUserId) return;
     const fetchContactUser = async () => {
-      const userRef = ref(db, `users/${contactUserId}`);
+      const userRefDb = ref(db, `users/${contactUserId}`);
       try {
-        const snapshot = await get(userRef);
+        const snapshot = await get(userRefDb);
         if (snapshot.exists()) {
           setContactUser({ ...snapshot.val(), uid: contactUserId } as UserProfile);
         } else {
@@ -67,7 +70,6 @@ export default function ConversationPage() {
     fetchContactUser();
   }, [contactUserId, router, toast]);
 
-  // Determine chatId and create chat room if not exists
   useEffect(() => {
     if (!currentUser || !contactUser) return;
 
@@ -75,9 +77,9 @@ export default function ConversationPage() {
     setChatId(currentChatId);
 
     const setupChatRoom = async () => {
-      const chatRoomRef = ref(db, `chatRooms/${currentChatId}`);
+      const chatRoomRefDb = ref(db, `chatRooms/${currentChatId}`);
       try {
-        const snapshot = await get(chatRoomRef);
+        const snapshot = await get(chatRoomRefDb);
         if (!snapshot.exists()) {
           const newChatRoomData: Omit<ChatRoom, 'id' | 'updatedAt'> & { updatedAt: object } = {
             participants: [currentUser.uid, contactUser.uid],
@@ -88,7 +90,7 @@ export default function ConversationPage() {
             ...newChatRoomData,
             updatedAt: serverTimestamp(),
           };
-          await set(chatRoomRef, newChatRoomWithTimestamp);
+          await set(chatRoomRefDb, newChatRoomWithTimestamp);
         }
       } catch (error) {
         console.error("Error creating/checking chat room in RTDB:", error);
@@ -102,13 +104,12 @@ export default function ConversationPage() {
   }, [currentUser, contactUser, getChatId, toast]);
 
 
-  // Subscribe to messages
   useEffect(() => {
     if (!chatId) return;
     setLoadingMessages(true);
-    const messagesRef = query(ref(db, `chatRooms/${chatId}/messages`), orderByChild('timestamp'));
+    const messagesRefDb = query(ref(db, `chatRooms/${chatId}/messages`), orderByChild('timestamp'));
 
-    const unsubscribe = onValue(messagesRef, (snapshot) => {
+    const unsubscribe = onValue(messagesRefDb, (snapshot) => {
       if (snapshot.exists()) {
         const messagesData = snapshot.val();
         const fetchedMessages = Object.keys(messagesData).map(key => ({
@@ -129,36 +130,66 @@ export default function ConversationPage() {
     return () => unsubscribe();
   }, [chatId, toast]);
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, file?: File | null) => {
     if (!currentUser || !chatId || !contactUser) {
       toast({ variant: "destructive", title: "Error", description: "Cannot send message. User or chat not properly initialized." });
       return;
     }
+    if (!text && !file) {
+      toast({ variant: "destructive", title: "Error", description: "Cannot send an empty message." });
+      return;
+    }
 
-    const messagesListRef = ref(db, `chatRooms/${chatId}/messages`);
-    const chatRoomMetaRef = ref(db, `chatRooms/${chatId}`);
+    const messagesListRefDb = ref(db, `chatRooms/${chatId}/messages`);
+    const chatRoomMetaRefDb = ref(db, `chatRooms/${chatId}`);
+    
+    let imageUrl: string | undefined = undefined;
 
+    if (file) {
+      try {
+        const imageStorageRef = storageRef(storage, `chatRooms/${chatId}/images/${Date.now()}_${file.name}`);
+        await uploadBytes(imageStorageRef, file);
+        imageUrl = await getDownloadURL(imageStorageRef);
+      } catch (error) {
+        console.error("Error uploading image to Firebase Storage:", error);
+        toast({ variant: "destructive", title: "Image Upload Failed", description: "Could not upload image. Message not sent." });
+        throw error; // Re-throw to stop message sending
+      }
+    }
+    
     const newMessageData: Omit<ChatMessage, 'id' | 'timestamp'> & { timestamp: object } = {
       senderId: currentUser.uid,
       senderEmail: currentUser.email || 'Unknown User',
-      text,
       timestamp: serverTimestamp(),
     };
 
+    if (text) {
+      newMessageData.text = text;
+    }
+    if (imageUrl) {
+      newMessageData.imageUrl = imageUrl;
+    }
+
     try {
-      const newMessageRef = push(messagesListRef);
+      const newMessageRef = push(messagesListRefDb);
       await set(newMessageRef, newMessageData);
+      
+      let lastMessageText = "[Image]";
+      if (text) lastMessageText = text;
+      else if (imageUrl && !text) lastMessageText = "[Image]";
+
 
       const updates: Partial<ChatRoom> & {updatedAt: object, lastMessage: Omit<ChatMessage, 'id' | 'isEdited' | 'editedAt'> & {timestamp: object}} = {
         lastMessage: {
-          text: newMessageData.text,
+          text: lastMessageText,
+          imageUrl: imageUrl, // Include imageUrl if present
           senderId: newMessageData.senderId,
           senderEmail: newMessageData.senderEmail,
           timestamp: serverTimestamp()
         },
         updatedAt: serverTimestamp()
       };
-      await update(chatRoomMetaRef, updates);
+      await update(chatRoomMetaRefDb, updates);
 
     } catch (error) {
       console.error("Error sending message to RTDB:", error);
@@ -171,44 +202,42 @@ export default function ConversationPage() {
       toast({ variant: "destructive", title: "Error", description: "Cannot delete message. Missing information." });
       return;
     }
-    const messageRef = ref(db, `chatRooms/${chatId}/messages/${messageId}`);
-    const chatRoomMetaRef = ref(db, `chatRooms/${chatId}`);
+    const messageRefDb = ref(db, `chatRooms/${chatId}/messages/${messageId}`);
+    const chatRoomMetaRefDb = ref(db, `chatRooms/${chatId}`);
 
     try {
-      // Check if the message to be deleted is the current lastMessage
       const currentMessageToDelete = messages.find(m => m.id === messageId);
-      const chatRoomSnapshot = await get(chatRoomMetaRef);
+      const chatRoomSnapshot = await get(chatRoomMetaRefDb);
       let isLastMessage = false;
       if (chatRoomSnapshot.exists()) {
         const chatRoomData = chatRoomSnapshot.val() as ChatRoom;
-        // Compare based on message text and senderId as timestamp might be slightly different due to serverTimestamp resolution
         if (chatRoomData.lastMessage && 
-            chatRoomData.lastMessage.text === currentMessageToDelete?.text &&
+            (chatRoomData.lastMessage.text === currentMessageToDelete?.text || (currentMessageToDelete?.imageUrl && chatRoomData.lastMessage.imageUrl === currentMessageToDelete?.imageUrl)) && // check text or imageUrl
             chatRoomData.lastMessage.senderId === currentMessageToDelete?.senderId) {
           isLastMessage = true;
         }
       }
       
-      await remove(messageRef);
+      await remove(messageRefDb);
+      // TODO: If message contained an image, consider deleting from Firebase Storage (requires image URL)
 
       if (isLastMessage) {
-        // Find the new last message from the remaining messages
         const remainingMessages = messages.filter(m => m.id !== messageId).sort((a, b) => (a.timestamp as number) - (b.timestamp as number));
         const newLastMessage = remainingMessages.length > 0 ? remainingMessages[remainingMessages.length - 1] : null;
         
         if (newLastMessage) {
-          await update(chatRoomMetaRef, {
+          await update(chatRoomMetaRefDb, {
             lastMessage: {
-              text: newLastMessage.text,
+              text: newLastMessage.text || (newLastMessage.imageUrl ? "[Image]" : ""),
+              imageUrl: newLastMessage.imageUrl,
               senderId: newLastMessage.senderId,
               senderEmail: newLastMessage.senderEmail,
-              timestamp: newLastMessage.timestamp // Use existing timestamp of the new last message
+              timestamp: newLastMessage.timestamp
             },
             updatedAt: serverTimestamp()
           });
         } else {
-          // No messages left, clear lastMessage
-          await update(chatRoomMetaRef, {
+          await update(chatRoomMetaRefDb, {
             lastMessage: null,
             updatedAt: serverTimestamp()
           });
@@ -218,7 +247,7 @@ export default function ConversationPage() {
     } catch (error) {
       console.error("Error deleting message from RTDB:", error);
       toast({ variant: "destructive", title: "Error", description: "Failed to delete message." });
-      throw error; // Re-throw to be caught by MessageItem
+      throw error;
     }
   };
 
@@ -227,6 +256,15 @@ export default function ConversationPage() {
       toast({ variant: "destructive", title: "Error", description: "Cannot edit message. Missing information." });
       return;
     }
+    // Note: Editing an image message would typically mean replacing the image, which is more complex.
+    // This implementation focuses on editing the text part of a message.
+    // If a message is image-only, editing text might not be applicable or could add text.
+    const originalMessage = messages.find(m => m.id === messageId);
+    if (!originalMessage || originalMessage.imageUrl && !newText.trim()) {
+        toast({ variant: "destructive", title: "Error", description: "Cannot remove text from an image message if it's the only content part to edit." });
+        return;
+    }
+
 
     try {
       const moderationResult = await moderateMessage({ message: newText });
@@ -236,34 +274,33 @@ export default function ConversationPage() {
           title: "Message Not Edited",
           description: moderationResult.reason || "Your edited message was flagged by our content moderation system.",
         });
-        return; // Don't proceed with edit
+        return;
       }
 
-      const messageRef = ref(db, `chatRooms/${chatId}/messages/${messageId}`);
-      const chatRoomMetaRef = ref(db, `chatRooms/${chatId}`);
+      const messageRefDb = ref(db, `chatRooms/${chatId}/messages/${messageId}`);
+      const chatRoomMetaRefDb = ref(db, `chatRooms/${chatId}`);
 
       const updates = {
         text: newText,
         isEdited: true,
         editedAt: serverTimestamp()
       };
-      await update(messageRef, updates);
+      await update(messageRefDb, updates);
 
-      // Check if this message is the lastMessage
-      const chatRoomSnapshot = await get(chatRoomMetaRef);
+      const chatRoomSnapshot = await get(chatRoomMetaRefDb);
       if (chatRoomSnapshot.exists()) {
         const chatRoomData = chatRoomSnapshot.val() as ChatRoom;
-         // We need to compare by original timestamp or a more robust ID if available for lastMessage
-         // For now, we'll assume if the message ID matches one that *could* be the last one, we update
-         // This is a simplification; robust last message tracking on edit might require more.
-         // We will update if its text matches current last message text
-         // A better approach would be to store messageId in lastMessage, but that's a larger schema change.
-        if (chatRoomData.lastMessage && chatRoomData.lastMessage.senderId === currentUser.uid) { // only update if current user sent the last message
-             const originalMessage = messages.find(m => m.id === messageId);
-             if (originalMessage && originalMessage.text === chatRoomData.lastMessage.text) {
-                 await update(chatRoomMetaRef, {
-                    'lastMessage/text': newText,
-                    'lastMessage/timestamp': serverTimestamp(), // Update timestamp to reflect edit time as "last activity"
+        if (chatRoomData.lastMessage && chatRoomData.lastMessage.senderId === currentUser.uid) {
+             const originalLastMessage = messages.find(m => m.id === messageId); // Re-fetch original to compare its timestamp or unique aspect
+             // This comparison is tricky if lastMessage was purely an image.
+             // For simplicity, if the IDs match and it was the last message, update its text part.
+             let oldLastMessageText = originalLastMessage?.text;
+             if (!oldLastMessageText && originalLastMessage?.imageUrl) oldLastMessageText = "[Image]";
+
+             if (originalLastMessage && (chatRoomData.lastMessage.text === oldLastMessageText || chatRoomData.lastMessage.imageUrl === originalLastMessage.imageUrl )) {
+                 await update(chatRoomMetaRefDb, {
+                    'lastMessage/text': newText || (originalMessage.imageUrl ? "[Image]" : ""), // Ensure lastMessage text is updated correctly
+                    'lastMessage/timestamp': serverTimestamp(),
                     updatedAt: serverTimestamp()
                 });
              }
@@ -273,7 +310,7 @@ export default function ConversationPage() {
     } catch (error) {
       console.error("Error editing message in RTDB:", error);
       toast({ variant: "destructive", title: "Error", description: "Failed to edit message." });
-      throw error; // Re-throw to be caught by MessageItem
+      throw error;
     }
   };
 

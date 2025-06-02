@@ -26,6 +26,7 @@ import { MoreHorizontal, Trash2, Edit3, Save, XCircle, Loader2 } from "lucide-re
 import { format } from 'date-fns';
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import NextImage from "next/image"; // Renamed to avoid conflict
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -37,14 +38,14 @@ interface MessageItemProps {
 
 export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDelete, onEdit }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [editedText, setEditedText] = useState(message.text);
+  const [editedText, setEditedText] = useState(message.text || "");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isProcessingEdit, setIsProcessingEdit] = useState(false);
   const [isProcessingDelete, setIsProcessingDelete] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    setEditedText(message.text); // Reset editedText if message prop changes (e.g., live update)
+    setEditedText(message.text || "");
   }, [message.text]);
 
   const getInitials = (email?: string | null) => {
@@ -61,12 +62,13 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
     : null;
 
   const handleSaveEdit = async () => {
-    if (editedText.trim() === message.text) {
+    if (editedText.trim() === (message.text || "")) {
       setIsEditing(false);
       return;
     }
-    if (!editedText.trim()) {
-      toast({ variant: "destructive", title: "Error", description: "Message cannot be empty." });
+    // Allow empty text if there's an image, otherwise text is required.
+    if (!editedText.trim() && !message.imageUrl) {
+      toast({ variant: "destructive", title: "Error", description: "Message text cannot be empty." });
       return;
     }
     setIsProcessingEdit(true);
@@ -84,13 +86,15 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
     setIsProcessingDelete(true);
     try {
       await onDelete(message.id);
-      setShowDeleteConfirm(false); // Close dialog on success
+      setShowDeleteConfirm(false);
     } catch (error) {
       // Toast is handled by onDelete typically
     } finally {
       setIsProcessingDelete(false);
     }
   };
+
+  const canEdit = message.text || !message.imageUrl; // Can edit if there's text, or if it's not an image-only message that became textless
 
   return (
     <div
@@ -116,10 +120,12 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => { setIsEditing(true); setEditedText(message.text); }}>
-                <Edit3 className="mr-2 h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
+              {canEdit && (
+                <DropdownMenuItem onClick={() => { setIsEditing(true); setEditedText(message.text || ""); }}>
+                  <Edit3 className="mr-2 h-4 w-4" />
+                  Edit Text
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)} className="text-destructive focus:text-destructive focus:bg-destructive/10">
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
@@ -130,13 +136,13 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
 
         <div
           className={cn(
-            "max-w-[70%] rounded-xl px-3 py-2 shadow-md min-w-[80px]", // Added min-w
+            "max-w-[70%] rounded-xl px-3 py-2 shadow-md min-w-[80px]",
             isCurrentUserMessage
               ? "rounded-br-none bg-primary text-primary-foreground"
               : "rounded-bl-none bg-card text-card-foreground border"
           )}
         >
-          {isEditing ? (
+          {isEditing && canEdit ? (
             <div className="space-y-2">
               <Textarea
                 value={editedText}
@@ -157,14 +163,26 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
                 <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)} disabled={isProcessingEdit} className="text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground h-auto px-2 py-1">
                   <XCircle className="h-4 w-4 mr-1" /> Cancel
                 </Button>
-                <Button variant="default" size="sm" onClick={handleSaveEdit} disabled={isProcessingEdit || !editedText.trim() || editedText.trim() === message.text} className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 h-auto px-2 py-1">
+                <Button variant="default" size="sm" onClick={handleSaveEdit} disabled={isProcessingEdit || (!editedText.trim() && !message.imageUrl) || editedText.trim() === (message.text || "")} className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 h-auto px-2 py-1">
                   {isProcessingEdit ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />} Save
                 </Button>
               </div>
             </div>
           ) : (
             <>
-              <p className="text-sm break-words whitespace-pre-wrap">{message.text}</p>
+              {message.imageUrl && (
+                <div className="relative aspect-video max-w-xs h-auto rounded-md overflow-hidden mb-1">
+                  <NextImage
+                    src={message.imageUrl}
+                    alt="Sent image"
+                    layout="fill"
+                    objectFit="contain"
+                    className="bg-muted"
+                    data-ai-hint="chat image"
+                  />
+                </div>
+              )}
+              {message.text && <p className="text-sm break-words whitespace-pre-wrap">{message.text}</p>}
               <div className="flex items-center justify-end mt-1">
                 {message.isEdited && (
                   <span className={cn(
