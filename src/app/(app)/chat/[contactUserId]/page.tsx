@@ -5,20 +5,21 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { db } from '@/lib/firebase';
-import { 
-  ref, 
-  query, 
-  orderByChild, 
-  onValue, 
-  push, 
-  serverTimestamp, 
-  get, 
-  set, 
+import {
+  ref,
+  query,
+  orderByChild,
+  onValue,
+  push,
+  serverTimestamp,
+  get,
+  set,
   update,
-  child, // for push
-  limitToLast // for message fetching, if needed later
+  remove, // For deleting messages
+  // limitToLast // for message fetching, if needed later
 } from 'firebase/database'; // RTDB imports
 import type { ChatMessage, UserProfile, ChatRoom } from '@/types';
+import { moderateMessage } from "@/ai/flows/moderate-message";
 
 import { ChatHeader } from '@/components/chat/chat-header';
 import { MessageList } from '@/components/chat/message-list';
@@ -31,7 +32,7 @@ export default function ConversationPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  
+
   const contactUserId = params.contactUserId as string;
 
   const [contactUser, setContactUser] = useState<UserProfile | null>(null);
@@ -72,7 +73,7 @@ export default function ConversationPage() {
 
     const currentChatId = getChatId(currentUser.uid, contactUser.uid);
     setChatId(currentChatId);
-    
+
     const setupChatRoom = async () => {
       const chatRoomRef = ref(db, `chatRooms/${currentChatId}`);
       try {
@@ -81,9 +82,7 @@ export default function ConversationPage() {
           const newChatRoomData: Omit<ChatRoom, 'id' | 'updatedAt'> & { updatedAt: object } = {
             participants: [currentUser.uid, contactUser.uid],
             participantEmails: [currentUser.email || '', contactUser.email || ''],
-            // lastMessage will be set when first message is sent
           };
-          // Explicitly type what's being set to include serverTimestamp()
           const newChatRoomWithTimestamp: ChatRoom = {
             id: currentChatId,
             ...newChatRoomData,
@@ -99,7 +98,7 @@ export default function ConversationPage() {
     };
 
     setupChatRoom();
-    
+
   }, [currentUser, contactUser, getChatId, toast]);
 
 
@@ -107,7 +106,7 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!chatId) return;
     setLoadingMessages(true);
-    const messagesRef = query(ref(db, `chatRooms/${chatId}/messages`), orderByChild('timestamp')); // Order by timestamp
+    const messagesRef = query(ref(db, `chatRooms/${chatId}/messages`), orderByChild('timestamp'));
 
     const unsubscribe = onValue(messagesRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -116,7 +115,6 @@ export default function ConversationPage() {
           id: key,
           ...messagesData[key],
         } as ChatMessage));
-        // RTDB orderByChild sorts ascending, which is what we want.
         setMessages(fetchedMessages);
       } else {
         setMessages([]);
@@ -139,25 +137,24 @@ export default function ConversationPage() {
 
     const messagesListRef = ref(db, `chatRooms/${chatId}/messages`);
     const chatRoomMetaRef = ref(db, `chatRooms/${chatId}`);
-    
+
     const newMessageData: Omit<ChatMessage, 'id' | 'timestamp'> & { timestamp: object } = {
       senderId: currentUser.uid,
       senderEmail: currentUser.email || 'Unknown User',
       text,
-      timestamp: serverTimestamp(), // RTDB server timestamp
+      timestamp: serverTimestamp(),
     };
 
     try {
-      const newMessageRef = push(messagesListRef); // Generates a unique key for the message
+      const newMessageRef = push(messagesListRef);
       await set(newMessageRef, newMessageData);
-      
-      // Update chat room metadata (last message and updatedAt)
-      const updates: Partial<ChatRoom> & {updatedAt: object, lastMessage: Omit<ChatMessage, 'id'> & {timestamp: object}} = {
+
+      const updates: Partial<ChatRoom> & {updatedAt: object, lastMessage: Omit<ChatMessage, 'id' | 'isEdited' | 'editedAt'> & {timestamp: object}} = {
         lastMessage: {
           text: newMessageData.text,
           senderId: newMessageData.senderId,
           senderEmail: newMessageData.senderEmail,
-          timestamp: serverTimestamp() 
+          timestamp: serverTimestamp()
         },
         updatedAt: serverTimestamp()
       };
@@ -168,7 +165,118 @@ export default function ConversationPage() {
       toast({ variant: "destructive", title: "Error", description: "Failed to send message." });
     }
   };
-  
+
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!currentUser || !chatId) {
+      toast({ variant: "destructive", title: "Error", description: "Cannot delete message. Missing information." });
+      return;
+    }
+    const messageRef = ref(db, `chatRooms/${chatId}/messages/${messageId}`);
+    const chatRoomMetaRef = ref(db, `chatRooms/${chatId}`);
+
+    try {
+      // Check if the message to be deleted is the current lastMessage
+      const currentMessageToDelete = messages.find(m => m.id === messageId);
+      const chatRoomSnapshot = await get(chatRoomMetaRef);
+      let isLastMessage = false;
+      if (chatRoomSnapshot.exists()) {
+        const chatRoomData = chatRoomSnapshot.val() as ChatRoom;
+        // Compare based on message text and senderId as timestamp might be slightly different due to serverTimestamp resolution
+        if (chatRoomData.lastMessage && 
+            chatRoomData.lastMessage.text === currentMessageToDelete?.text &&
+            chatRoomData.lastMessage.senderId === currentMessageToDelete?.senderId) {
+          isLastMessage = true;
+        }
+      }
+      
+      await remove(messageRef);
+
+      if (isLastMessage) {
+        // Find the new last message from the remaining messages
+        const remainingMessages = messages.filter(m => m.id !== messageId).sort((a, b) => (a.timestamp as number) - (b.timestamp as number));
+        const newLastMessage = remainingMessages.length > 0 ? remainingMessages[remainingMessages.length - 1] : null;
+        
+        if (newLastMessage) {
+          await update(chatRoomMetaRef, {
+            lastMessage: {
+              text: newLastMessage.text,
+              senderId: newLastMessage.senderId,
+              senderEmail: newLastMessage.senderEmail,
+              timestamp: newLastMessage.timestamp // Use existing timestamp of the new last message
+            },
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          // No messages left, clear lastMessage
+          await update(chatRoomMetaRef, {
+            lastMessage: null,
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+      toast({ title: "Success", description: "Message deleted." });
+    } catch (error) {
+      console.error("Error deleting message from RTDB:", error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to delete message." });
+      throw error; // Re-throw to be caught by MessageItem
+    }
+  };
+
+  const handleEditMessage = async (messageId: string, newText: string) => {
+     if (!currentUser || !chatId) {
+      toast({ variant: "destructive", title: "Error", description: "Cannot edit message. Missing information." });
+      return;
+    }
+
+    try {
+      const moderationResult = await moderateMessage({ message: newText });
+      if (!moderationResult.isSafe) {
+        toast({
+          variant: "destructive",
+          title: "Message Not Edited",
+          description: moderationResult.reason || "Your edited message was flagged by our content moderation system.",
+        });
+        return; // Don't proceed with edit
+      }
+
+      const messageRef = ref(db, `chatRooms/${chatId}/messages/${messageId}`);
+      const chatRoomMetaRef = ref(db, `chatRooms/${chatId}`);
+
+      const updates = {
+        text: newText,
+        isEdited: true,
+        editedAt: serverTimestamp()
+      };
+      await update(messageRef, updates);
+
+      // Check if this message is the lastMessage
+      const chatRoomSnapshot = await get(chatRoomMetaRef);
+      if (chatRoomSnapshot.exists()) {
+        const chatRoomData = chatRoomSnapshot.val() as ChatRoom;
+         // We need to compare by original timestamp or a more robust ID if available for lastMessage
+         // For now, we'll assume if the message ID matches one that *could* be the last one, we update
+         // This is a simplification; robust last message tracking on edit might require more.
+         // We will update if its text matches current last message text
+         // A better approach would be to store messageId in lastMessage, but that's a larger schema change.
+        if (chatRoomData.lastMessage && chatRoomData.lastMessage.senderId === currentUser.uid) { // only update if current user sent the last message
+             const originalMessage = messages.find(m => m.id === messageId);
+             if (originalMessage && originalMessage.text === chatRoomData.lastMessage.text) {
+                 await update(chatRoomMetaRef, {
+                    'lastMessage/text': newText,
+                    'lastMessage/timestamp': serverTimestamp(), // Update timestamp to reflect edit time as "last activity"
+                    updatedAt: serverTimestamp()
+                });
+             }
+        }
+      }
+      toast({ title: "Success", description: "Message edited." });
+    } catch (error) {
+      console.error("Error editing message in RTDB:", error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to edit message." });
+      throw error; // Re-throw to be caught by MessageItem
+    }
+  };
+
   if (authLoading || loadingChatInfo || !contactUser) {
     return (
       <div className="flex h-full flex-col items-center justify-center">
@@ -181,7 +289,13 @@ export default function ConversationPage() {
   return (
     <div className="flex h-full max-h-screen flex-col bg-background">
       <ChatHeader contactUser={contactUser} />
-      <MessageList messages={messages} contactUser={contactUser} loadingMessages={loadingMessages} />
+      <MessageList
+        messages={messages}
+        contactUser={contactUser}
+        loadingMessages={loadingMessages}
+        onDeleteMessage={handleDeleteMessage}
+        onEditMessage={handleEditMessage}
+      />
       <MessageInput onSendMessage={handleSendMessage} />
     </div>
   );

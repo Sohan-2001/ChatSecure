@@ -12,9 +12,11 @@ interface MessageListProps {
   messages: ChatMessage[];
   contactUser: UserProfile | null;
   loadingMessages: boolean;
+  onDeleteMessage: (messageId: string) => Promise<void>;
+  onEditMessage: (messageId: string, newText: string) => Promise<void>;
 }
 
-export function MessageList({ messages, contactUser, loadingMessages }: MessageListProps) {
+export function MessageList({ messages, contactUser, loadingMessages, onDeleteMessage, onEditMessage }: MessageListProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const { user: currentUser } = useAuth();
@@ -32,7 +34,7 @@ export function MessageList({ messages, contactUser, loadingMessages }: MessageL
       </div>
     );
   }
-  
+
   if (!messages || messages.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
@@ -53,6 +55,8 @@ export function MessageList({ messages, contactUser, loadingMessages }: MessageL
               message={msg}
               isCurrentUserMessage={isCurrentUserMessage}
               senderProfile={{ email: senderProfile?.email || null, photoURL: senderProfile?.photoURL}}
+              onDelete={onDeleteMessage}
+              onEdit={onEditMessage}
             />
           );
         })}
