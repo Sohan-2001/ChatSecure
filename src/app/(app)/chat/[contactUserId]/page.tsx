@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState, useCallback } from 'react';
@@ -5,20 +6,18 @@ import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { db } from '@/lib/firebase';
 import { 
-  collection, 
+  ref, 
   query, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  serverTimestamp,
-  doc,
-  getDoc,
-  where,
-  limit,
-  setDoc,
-  Timestamp,
-  writeBatch
-} from 'firebase/firestore';
+  orderByChild, 
+  onValue, 
+  push, 
+  serverTimestamp, 
+  get, 
+  set, 
+  update,
+  child, // for push
+  limitToLast // for message fetching, if needed later
+} from 'firebase/database'; // RTDB imports
 import type { ChatMessage, UserProfile, ChatRoom } from '@/types';
 
 import { ChatHeader } from '@/components/chat/chat-header';
@@ -49,12 +48,18 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!contactUserId) return;
     const fetchContactUser = async () => {
-      const userDocRef = doc(db, 'users', contactUserId);
-      const userDocSnap = await getDoc(userDocRef);
-      if (userDocSnap.exists()) {
-        setContactUser(userDocSnap.data() as UserProfile);
-      } else {
-        toast({ variant: 'destructive', title: 'Error', description: 'Contact user not found.' });
+      const userRef = ref(db, `users/${contactUserId}`);
+      try {
+        const snapshot = await get(userRef);
+        if (snapshot.exists()) {
+          setContactUser({ ...snapshot.val(), uid: contactUserId } as UserProfile);
+        } else {
+          toast({ variant: 'destructive', title: 'Error', description: 'Contact user not found.' });
+          router.push('/chat');
+        }
+      } catch (error) {
+        console.error("Error fetching contact user from RTDB:", error);
+        toast({ variant: 'destructive', title: 'Error', description: 'Could not load contact details.' });
         router.push('/chat');
       }
     };
@@ -69,22 +74,26 @@ export default function ConversationPage() {
     setChatId(currentChatId);
     
     const setupChatRoom = async () => {
-      const chatRoomRef = doc(db, 'chatRooms', currentChatId);
-      const chatRoomSnap = await getDoc(chatRoomRef);
-
-      if (!chatRoomSnap.exists()) {
-        const newChatRoom: ChatRoom = {
-          id: currentChatId,
-          participants: [currentUser.uid, contactUser.uid],
-          participantEmails: [currentUser.email || '', contactUser.email || ''],
-          updatedAt: serverTimestamp() as Timestamp,
-        };
-        try {
-          await setDoc(chatRoomRef, newChatRoom);
-        } catch (error) {
-          console.error("Error creating chat room:", error);
-          toast({ variant: "destructive", title: "Error", description: "Could not initialize chat." });
+      const chatRoomRef = ref(db, `chatRooms/${currentChatId}`);
+      try {
+        const snapshot = await get(chatRoomRef);
+        if (!snapshot.exists()) {
+          const newChatRoomData: Omit<ChatRoom, 'id' | 'updatedAt'> & { updatedAt: object } = {
+            participants: [currentUser.uid, contactUser.uid],
+            participantEmails: [currentUser.email || '', contactUser.email || ''],
+            // lastMessage will be set when first message is sent
+          };
+          // Explicitly type what's being set to include serverTimestamp()
+          const newChatRoomWithTimestamp: ChatRoom = {
+            id: currentChatId,
+            ...newChatRoomData,
+            updatedAt: serverTimestamp(),
+          };
+          await set(chatRoomRef, newChatRoomWithTimestamp);
         }
+      } catch (error) {
+        console.error("Error creating/checking chat room in RTDB:", error);
+        toast({ variant: "destructive", title: "Error", description: "Could not initialize chat." });
       }
       setLoadingChatInfo(false);
     };
@@ -98,18 +107,23 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!chatId) return;
     setLoadingMessages(true);
-    const messagesColRef = collection(db, 'chatRooms', chatId, 'messages');
-    const q = query(messagesColRef, orderBy('timestamp', 'asc'));
+    const messagesRef = query(ref(db, `chatRooms/${chatId}/messages`), orderByChild('timestamp')); // Order by timestamp
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedMessages = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      } as ChatMessage));
-      setMessages(fetchedMessages);
+    const unsubscribe = onValue(messagesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const messagesData = snapshot.val();
+        const fetchedMessages = Object.keys(messagesData).map(key => ({
+          id: key,
+          ...messagesData[key],
+        } as ChatMessage));
+        // RTDB orderByChild sorts ascending, which is what we want.
+        setMessages(fetchedMessages);
+      } else {
+        setMessages([]);
+      }
       setLoadingMessages(false);
     }, (error) => {
-      console.error("Error fetching messages:", error);
+      console.error("Error fetching messages from RTDB:", error);
       toast({ variant: "destructive", title: "Error", description: "Could not load messages." });
       setLoadingMessages(false);
     });
@@ -123,31 +137,34 @@ export default function ConversationPage() {
       return;
     }
 
-    const messagesColRef = collection(db, 'chatRooms', chatId, 'messages');
-    const chatRoomRef = doc(db, 'chatRooms', chatId);
+    const messagesListRef = ref(db, `chatRooms/${chatId}/messages`);
+    const chatRoomMetaRef = ref(db, `chatRooms/${chatId}`);
     
-    const newMessage: Omit<ChatMessage, 'id' | 'timestamp'> & { timestamp: any } = {
+    const newMessageData: Omit<ChatMessage, 'id' | 'timestamp'> & { timestamp: object } = {
       senderId: currentUser.uid,
       senderEmail: currentUser.email || 'Unknown User',
       text,
-      timestamp: serverTimestamp(),
+      timestamp: serverTimestamp(), // RTDB server timestamp
     };
 
     try {
-      const batch = writeBatch(db);
-      const messageDocRef = doc(messagesColRef); // Auto-generate ID for new message
-      batch.set(messageDocRef, newMessage);
-      batch.update(chatRoomRef, { 
-        lastMessage: { 
-          text: newMessage.text, 
-          senderId: newMessage.senderId,
-          timestamp: newMessage.timestamp // This will be a server timestamp placeholder
+      const newMessageRef = push(messagesListRef); // Generates a unique key for the message
+      await set(newMessageRef, newMessageData);
+      
+      // Update chat room metadata (last message and updatedAt)
+      const updates: Partial<ChatRoom> & {updatedAt: object, lastMessage: Omit<ChatMessage, 'id'> & {timestamp: object}} = {
+        lastMessage: {
+          text: newMessageData.text,
+          senderId: newMessageData.senderId,
+          senderEmail: newMessageData.senderEmail,
+          timestamp: serverTimestamp() 
         },
-        updatedAt: serverTimestamp() 
-      });
-      await batch.commit();
+        updatedAt: serverTimestamp()
+      };
+      await update(chatRoomMetaRef, updates);
+
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("Error sending message to RTDB:", error);
       toast({ variant: "destructive", title: "Error", description: "Failed to send message." });
     }
   };
@@ -160,7 +177,6 @@ export default function ConversationPage() {
       </div>
     );
   }
-
 
   return (
     <div className="flex h-full max-h-screen flex-col bg-background">

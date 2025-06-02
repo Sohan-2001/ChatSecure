@@ -2,13 +2,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, getDocs, onSnapshot, orderBy } from 'firebase/firestore';
+import { ref, query, orderByChild, onValue, get } from 'firebase/database'; // RTDB imports
 import { db } from '@/lib/firebase';
 import type { UserProfile } from '@/types';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Search, UserCircle2, MessageCircle } from 'lucide-react';
+import { Search, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
@@ -30,21 +30,26 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
 
     console.log('UserSearchAndList: Current user:', currentUser);
     setLoading(true);
-    const usersCol = collection(db, 'users');
-    // Fetch all users, order by email. Current user will be filtered out client-side.
-    const q = query(usersCol, orderBy('email'));
+    const usersRef = ref(db, 'users');
+    // Query users, order by email. Current user will be filtered out client-side.
+    const usersQuery = query(usersRef, orderByChild('email'));
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log('UserSearchAndList: Snapshot received, docs count:', snapshot.docs.length);
-      const usersData = snapshot.docs
-        .map(doc => doc.data() as UserProfile)
-        .filter(userToList => userToList.uid !== currentUser.uid); // Filter out current user
-      
-      console.log('UserSearchAndList: Fetched and filtered users data:', usersData);
-      setAllUsers(usersData);
+    const unsubscribe = onValue(usersQuery, (snapshot) => {
+      if (snapshot.exists()) {
+        const usersDataObj = snapshot.val();
+        const usersData = Object.keys(usersDataObj)
+          .map(key => ({ ...usersDataObj[key], uid: key } as UserProfile)) // Ensure uid is part of the object
+          .filter(userToList => userToList.uid !== currentUser.uid); // Filter out current user
+        
+        console.log('UserSearchAndList: Fetched and filtered users data from RTDB:', usersData);
+        setAllUsers(usersData);
+      } else {
+        setAllUsers([]);
+        console.log('UserSearchAndList: No users found in RTDB.');
+      }
       setLoading(false);
     }, (error) => {
-      console.error("UserSearchAndList: Error fetching users:", error);
+      console.error("UserSearchAndList: Error fetching users from RTDB:", error);
       setLoading(false);
     });
 
@@ -69,9 +74,26 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
     return pathname === `/chat/${userId}`;
   };
 
-  if (!currentUser) {
-    return <div className="p-4 text-muted-foreground">Loading user data...</div>;
+  if (!currentUser && loading) { // Show loader if current user not loaded yet AND still loading users list
+    return (
+      <div className="p-4">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="flex items-center space-x-3 rounded-md p-2">
+            <Skeleton className="h-10 w-10 rounded-full" />
+            <div className="space-y-1">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
+  
+  if (!currentUser) {
+     return <div className="p-4 text-muted-foreground">Authenticating user...</div>;
+  }
+
 
   return (
     <div className="flex h-full flex-col border-r bg-card">

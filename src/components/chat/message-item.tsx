@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ChatMessage } from "@/types";
@@ -17,9 +18,11 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile }: Me
     return email.substring(0, 2).toUpperCase();
   };
   
-  const formattedTimestamp = message.timestamp ? 
-    format(message.timestamp instanceof Date ? message.timestamp : message.timestamp.toDate(), 'p') 
-    : '';
+  // RTDB timestamp is a number (milliseconds since epoch) when read, or an object placeholder before write.
+  // Assuming it's a number when rendered.
+  const formattedTimestamp = typeof message.timestamp === 'number' ? 
+    format(new Date(message.timestamp), 'p') 
+    : 'sending...'; // Fallback if timestamp is not yet a number
 
   return (
     <div

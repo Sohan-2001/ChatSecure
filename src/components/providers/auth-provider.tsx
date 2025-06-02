@@ -12,12 +12,12 @@ import {
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   updateProfile
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { ref, get, set, serverTimestamp } from 'firebase/database'; // RTDB imports
 import { auth, db } from '@/lib/firebase';
 import type { UserProfile } from '@/types';
 import type { LoginFormInputs } from '@/components/auth/login-form';
 import type { SignupFormInputs } from '@/components/auth/signup-form';
-import type { ResetPasswordFormInputs } from '@/components/auth/reset-password-form';
+// ResetPasswordFormInputs not used here, can be removed if not used elsewhere or kept for consistency
 
 export interface AuthContextType {
   user: UserProfile | null;
@@ -43,32 +43,32 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const fetchUserProfile = useCallback(async (fbUser: FirebaseUserType) => {
     if (!fbUser) return;
-    const userDocRef = doc(db, 'users', fbUser.uid);
+    const userRef = ref(db, `users/${fbUser.uid}`); // RTDB ref
     try {
-      console.log(`AuthProvider: Attempting to fetch profile for UID: ${fbUser.uid}`);
-      const userDocSnap = await getDoc(userDocRef);
-      if (userDocSnap.exists()) {
-        setUser(userDocSnap.data() as UserProfile);
-        console.log(`AuthProvider: Profile found for UID: ${fbUser.uid}`, userDocSnap.data());
+      console.log(`AuthProvider: Attempting to fetch profile for UID: ${fbUser.uid} from RTDB`);
+      const snapshot = await get(userRef); // RTDB get
+      if (snapshot.exists()) {
+        setUser(snapshot.val() as UserProfile);
+        console.log(`AuthProvider: Profile found for UID: ${fbUser.uid} in RTDB`, snapshot.val());
       } else {
-        console.log(`AuthProvider: No profile found for UID: ${fbUser.uid}. Creating one.`);
+        console.log(`AuthProvider: No profile found for UID: ${fbUser.uid} in RTDB. Creating one.`);
         const newUserProfile: UserProfile = {
           uid: fbUser.uid,
           email: fbUser.email,
           displayName: fbUser.displayName || fbUser.email,
           photoURL: fbUser.photoURL
         };
-        await setDoc(userDocRef, newUserProfile);
+        await set(userRef, newUserProfile); // RTDB set
         setUser(newUserProfile);
-        console.log(`AuthProvider: Profile created for UID: ${fbUser.uid}`, newUserProfile);
+        console.log(`AuthProvider: Profile created for UID: ${fbUser.uid} in RTDB`, newUserProfile);
       }
     } catch (error: any) {
-      console.error(`AuthProvider: Error fetching/creating user profile for UID: ${fbUser.uid}`, error);
-      if (error.message && error.message.includes("client is offline")) {
-        console.error("AuthProvider: Critical - Firestore client is offline. User profile cannot be fetched or created. User experience will be degraded.");
+      console.error(`AuthProvider: Error fetching/creating user profile for UID: ${fbUser.uid} from RTDB`, error);
+      if (error.message && (error.message.includes("client is offline") || error.message.includes("Failed to fetch") || error.message.includes("NETWORK_ERROR") )) {
+        console.error("AuthProvider: Critical - Firebase client is offline or network error. User profile cannot be fetched or created. User experience will be degraded.");
       }
-      setUser(null); // Set user to null if profile fetch fails
-      throw error; // Re-throw to indicate failure
+      setUser(null); 
+      throw error; 
     }
   }, []);
 
@@ -80,8 +80,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         try {
           await fetchUserProfile(fbUser);
         } catch (error) {
-          // Error is already logged in fetchUserProfile
-          // setUser(null) is also handled there.
+          // Error is logged in fetchUserProfile
         }
       } else {
         setFirebaseUser(null);
@@ -104,22 +103,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         displayName: displayName || userCredential.user.email,
         photoURL: userCredential.user.photoURL,
       };
-      await setDoc(doc(db, 'users', userCredential.user.uid), newUserProfile);
-      // onAuthStateChanged will handle setting the user and fetching the profile
-      console.log("AuthProvider: Signup successful, profile created in Firestore.");
+      await set(ref(db, `users/${userCredential.user.uid}`), newUserProfile); // RTDB set
+      console.log("AuthProvider: Signup successful, profile created in RTDB.");
     }
   };
 
   const logIn = async (data: LoginFormInputs) => {
     const { email, password } = data;
     await signInWithEmailAndPassword(auth, email, password);
-    // onAuthStateChanged will handle setting the user and fetching profile
     console.log("AuthProvider: Login successful.");
   };
 
   const logOut = async () => {
     await firebaseSignOut(auth);
-    // onAuthStateChanged will handle setting user to null
     console.log("AuthProvider: Logout successful.");
   };
 
