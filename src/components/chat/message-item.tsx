@@ -22,21 +22,23 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MoreHorizontal, Trash2, Edit3, Save, XCircle, Loader2 } from "lucide-react";
+import { MoreHorizontal, Trash2, Edit3, Save, XCircle, Loader2, MessageSquareX } from "lucide-react";
 import { format } from 'date-fns';
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import NextImage from "next/image";
+import { useAuth } from "@/hooks/use-auth"; // Import useAuth
 
 interface MessageItemProps {
   message: ChatMessage;
-  isCurrentUserMessage: boolean;
-  senderProfile?: { email: string | null, photoURL?: string | null };
+  isCurrentUserMessage: boolean; // Still useful to determine initial alignment and sender avatar
+  senderProfile?: { email: string | null, photoURL?: string | null }; // This is the profile of who sent the message
   onDelete: (messageId: string) => Promise<void>;
   onEdit: (messageId: string, newText: string) => Promise<void>;
 }
 
 export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDelete, onEdit }: MessageItemProps) {
+  const { user: currentUser } = useAuth(); // Get current authenticated user
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(message.text || "");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -85,15 +87,48 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
     setIsProcessingDelete(true);
     try {
       await onDelete(message.id);
-      setShowDeleteConfirm(false);
+      setShowDeleteConfirm(false); // Close dialog on success
     } catch (error) {
-      // Toast is handled by onDelete typically
+      // Toast handled by onDelete
     } finally {
       setIsProcessingDelete(false);
     }
   };
 
-  const canEdit = message.text || !message.imageUrl;
+  // Current user is the one viewing the message.
+  // message.senderId is the ID of the user who sent the message.
+  const isSenderViewingOwnMessage = currentUser?.uid === message.senderId;
+  const canEdit = isSenderViewingOwnMessage && (message.text || !message.imageUrl);
+
+  if (message.deletedFor && message.deletedFor[currentUser?.uid || '']) {
+    return (
+      <div
+        className={cn(
+          "group flex items-start gap-2 py-2 px-1",
+          isCurrentUserMessage ? "justify-end" : "justify-start"
+        )}
+      >
+        {!isCurrentUserMessage && (
+          <Avatar className="h-8 w-8 invisible"> {/* Keep space for alignment */}
+             <AvatarFallback></AvatarFallback>
+          </Avatar>
+        )}
+         <div className={cn(
+            "flex items-center gap-1.5 rounded-xl px-3 py-2 shadow-sm text-xs italic",
+            isCurrentUserMessage ? "bg-muted text-muted-foreground" : "border bg-card text-muted-foreground"
+          )}>
+            <MessageSquareX className="h-3 w-3 mr-1 shrink-0" />
+            You deleted this message.
+          </div>
+        {isCurrentUserMessage && (
+           <Avatar className="h-8 w-8 invisible"> {/* Keep space for alignment */}
+             <AvatarFallback></AvatarFallback>
+          </Avatar>
+        )}
+      </div>
+    );
+  }
+
 
   return (
     <div
@@ -110,16 +145,17 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
           </AvatarFallback>
         </Avatar>
       )}
-      <div className="flex items-start gap-1"> {/* Changed from items-end */}
-        {isCurrentUserMessage && !isEditing && (
+      <div className="flex items-start gap-1">
+        {/* Show dropdown for all messages if not editing */}
+        {!isEditing && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity order-first data-[state=open]:opacity-100">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {canEdit && (
+            <DropdownMenuContent align={isCurrentUserMessage ? "end" : "start"}>
+              {canEdit && ( // Edit option only for sender
                 <DropdownMenuItem onClick={() => { setIsEditing(true); setEditedText(message.text || ""); }}>
                   <Edit3 className="mr-2 h-4 w-4" />
                   Edit Text
@@ -141,7 +177,7 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
               : "rounded-bl-none bg-card text-card-foreground border"
           )}
         >
-          {isEditing && canEdit ? (
+          {isEditing && canEdit ? ( // Ensure only sender can see edit UI
             <div className="space-y-2">
               <Textarea
                 value={editedText}
@@ -174,14 +210,14 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
                   <NextImage
                     src={message.imageUrl}
                     alt="Sent image"
-                    width={0} 
+                    width={0}
                     height={0}
                     sizes="100vw"
                     style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
                     className="bg-muted rounded-md"
                     data-ai-hint="chat image"
                     unoptimized={true}
-                    priority={false} 
+                    priority={false}
                   />
                 </div>
               )}
@@ -207,9 +243,9 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
 
       {isCurrentUserMessage && (
         <Avatar className="h-8 w-8">
-          <AvatarImage src={senderProfile?.photoURL || undefined} />
+          <AvatarImage src={currentUser?.photoURL || undefined} />
           <AvatarFallback className="bg-muted text-muted-foreground text-xs">
-            {getInitials(senderProfile?.email)}
+            {getInitials(currentUser?.email)}
           </AvatarFallback>
         </Avatar>
       )}
@@ -217,16 +253,19 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Message?</AlertDialogTitle>
+            <AlertDialogTitle>{isSenderViewingOwnMessage ? "Delete Message for Everyone?" : "Delete Message for You?"}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this message? This action cannot be undone.
+              {isSenderViewingOwnMessage
+                ? "This will permanently delete the message for all participants in this chat."
+                : "This message will be hidden from your view. Other participants may still see it."}
+              <br />This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isProcessingDelete}>Cancel</AlertDialogCancel>
             <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isProcessingDelete}>
               {isProcessingDelete && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Delete
+              {isSenderViewingOwnMessage ? "Delete for Everyone" : "Delete for Me"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

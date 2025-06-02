@@ -14,17 +14,18 @@ export interface ChatMessage {
   id: string;
   senderId: string;
   senderEmail: string;
-  text?: string; // Text is now optional
-  imageUrl?: string; // To store the URL of the sent image
+  text?: string;
+  imageUrl?: string;
   timestamp: number | object;
   isEdited?: boolean;
   editedAt?: number | object;
+  deletedFor?: { [userId: string]: true }; // Added for "Delete for me"
 }
 
 export interface ChatRoom {
   id: string;
   participants: string[];
   participantEmails: string[];
-  lastMessage?: ChatMessage; 
+  lastMessage?: ChatMessage;
   updatedAt: number | object;
 }

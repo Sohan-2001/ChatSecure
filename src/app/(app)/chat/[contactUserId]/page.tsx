@@ -4,7 +4,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
-import { db } from '@/lib/firebase'; // Removed storage import
+import { db } from '@/lib/firebase';
 import {
   ref,
   query,
@@ -17,7 +17,6 @@ import {
   update,
   remove,
 } from 'firebase/database';
-// Firebase Storage imports removed
 import type { ChatMessage, UserProfile, ChatRoom } from '@/types';
 import { moderateMessage } from "@/ai/flows/moderate-message";
 
@@ -139,7 +138,7 @@ export default function ConversationPage() {
     const messagesListRefDb = ref(db, `chatRooms/${chatId}/messages`);
     const chatRoomMetaRefDb = ref(db, `chatRooms/${chatId}`);
     
-    const newMessageData: Omit<ChatMessage, 'id' | 'timestamp'> & { timestamp: object } = {
+    const newMessageData: Omit<ChatMessage, 'id' | 'timestamp' | 'deletedFor'> & { timestamp: object } = {
       senderId: currentUser.uid,
       senderEmail: currentUser.email || 'Unknown User',
       timestamp: serverTimestamp(),
@@ -149,7 +148,7 @@ export default function ConversationPage() {
       newMessageData.text = text;
     }
     if (imageDataUrl) {
-      newMessageData.imageUrl = imageDataUrl; // Store Base64 Data URL
+      newMessageData.imageUrl = imageDataUrl;
     }
 
     try {
@@ -160,11 +159,10 @@ export default function ConversationPage() {
       if (text) lastMessageText = text;
       else if (imageDataUrl && !text) lastMessageText = "[Image]";
 
-
-      const updates: Partial<ChatRoom> & {updatedAt: object, lastMessage: Omit<ChatMessage, 'id' | 'isEdited' | 'editedAt'> & {timestamp: object}} = {
+      const updates: Partial<ChatRoom> & {updatedAt: object, lastMessage: Omit<ChatMessage, 'id' | 'isEdited' | 'editedAt' | 'deletedFor'> & {timestamp: object}} = {
         lastMessage: {
           text: lastMessageText,
-          imageUrl: imageDataUrl, // Include Data URL if present
+          imageUrl: imageDataUrl,
           senderId: newMessageData.senderId,
           senderEmail: newMessageData.senderEmail,
           timestamp: serverTimestamp()
@@ -187,51 +185,67 @@ export default function ConversationPage() {
     const messageRefDb = ref(db, `chatRooms/${chatId}/messages/${messageId}`);
     const chatRoomMetaRefDb = ref(db, `chatRooms/${chatId}`);
 
-    try {
-      const currentMessageToDelete = messages.find(m => m.id === messageId);
-      const chatRoomSnapshot = await get(chatRoomMetaRefDb);
-      let isLastMessage = false;
-      if (chatRoomSnapshot.exists()) {
-        const chatRoomData = chatRoomSnapshot.val() as ChatRoom;
-        if (chatRoomData.lastMessage && 
-            (chatRoomData.lastMessage.text === currentMessageToDelete?.text || (currentMessageToDelete?.imageUrl && chatRoomData.lastMessage.imageUrl === currentMessageToDelete?.imageUrl)) && 
-            chatRoomData.lastMessage.senderId === currentMessageToDelete?.senderId) {
-          isLastMessage = true;
-        }
-      }
-      
-      await remove(messageRefDb);
-      // No need to delete from Firebase Storage for RTDB-stored images.
+    const messageToDelete = messages.find(m => m.id === messageId);
+    if (!messageToDelete) {
+        toast({ variant: "destructive", title: "Error", description: "Message not found." });
+        return;
+    }
 
-      if (isLastMessage) {
-        const remainingMessages = messages.filter(m => m.id !== messageId).sort((a, b) => (a.timestamp as number) - (b.timestamp as number));
-        const newLastMessage = remainingMessages.length > 0 ? remainingMessages[remainingMessages.length - 1] : null;
-        
-        if (newLastMessage) {
-          await update(chatRoomMetaRefDb, {
-            lastMessage: {
-              text: newLastMessage.text || (newLastMessage.imageUrl ? "[Image]" : ""),
-              imageUrl: newLastMessage.imageUrl,
-              senderId: newLastMessage.senderId,
-              senderEmail: newLastMessage.senderEmail,
-              timestamp: newLastMessage.timestamp
-            },
-            updatedAt: serverTimestamp()
-          });
-        } else {
-          await update(chatRoomMetaRefDb, {
-            lastMessage: null,
-            updatedAt: serverTimestamp()
-          });
+    try {
+      if (messageToDelete.senderId === currentUser.uid) {
+        // Sender deletes: Delete for everyone
+        const chatRoomSnapshot = await get(chatRoomMetaRefDb);
+        let isLastMessage = false;
+        if (chatRoomSnapshot.exists()) {
+          const chatRoomData = chatRoomSnapshot.val() as ChatRoom;
+          if (chatRoomData.lastMessage && 
+              ((chatRoomData.lastMessage.text === messageToDelete.text) || (messageToDelete.imageUrl && chatRoomData.lastMessage.imageUrl === messageToDelete.imageUrl)) && 
+              chatRoomData.lastMessage.senderId === messageToDelete.senderId) {
+            isLastMessage = true;
+          }
         }
+        
+        await remove(messageRefDb);
+
+        if (isLastMessage) {
+          const remainingMessages = messages.filter(m => m.id !== messageId).sort((a, b) => (a.timestamp as number) - (b.timestamp as number));
+          const newLastMessage = remainingMessages.length > 0 ? remainingMessages[remainingMessages.length - 1] : null;
+          
+          if (newLastMessage) {
+            await update(chatRoomMetaRefDb, {
+              lastMessage: {
+                text: newLastMessage.text || (newLastMessage.imageUrl ? "[Image]" : ""),
+                imageUrl: newLastMessage.imageUrl,
+                senderId: newLastMessage.senderId,
+                senderEmail: newLastMessage.senderEmail,
+                timestamp: newLastMessage.timestamp
+              },
+              updatedAt: serverTimestamp()
+            });
+          } else {
+            await update(chatRoomMetaRefDb, {
+              lastMessage: null,
+              updatedAt: serverTimestamp()
+            });
+          }
+        }
+        toast({ title: "Success", description: "Message deleted for everyone." });
+
+      } else {
+        // Receiver deletes: Delete for me
+        const updates = {
+          [`deletedFor/${currentUser.uid}`]: true
+        };
+        await update(messageRefDb, updates);
+        toast({ title: "Success", description: "Message deleted for you." });
       }
-      toast({ title: "Success", description: "Message deleted." });
     } catch (error) {
       console.error("Error deleting message from RTDB:", error);
       toast({ variant: "destructive", title: "Error", description: "Failed to delete message." });
-      throw error;
+      throw error; // Re-throw to allow MessageItem to handle UI state
     }
   };
+
 
   const handleEditMessage = async (messageId: string, newText: string) => {
      if (!currentUser || !chatId) {
@@ -239,9 +253,13 @@ export default function ConversationPage() {
       return;
     }
     const originalMessage = messages.find(m => m.id === messageId);
-    if (!originalMessage || originalMessage.imageUrl && !newText.trim()) {
+    if (!originalMessage || (originalMessage.imageUrl && !newText.trim())) {
         toast({ variant: "destructive", title: "Error", description: "Cannot remove text from an image message if it's the only content part to edit." });
         return;
+    }
+    if (originalMessage.senderId !== currentUser.uid) {
+      toast({ variant: "destructive", title: "Error", description: "You can only edit your own messages." });
+      return;
     }
 
     try {
@@ -269,11 +287,8 @@ export default function ConversationPage() {
       if (chatRoomSnapshot.exists()) {
         const chatRoomData = chatRoomSnapshot.val() as ChatRoom;
         if (chatRoomData.lastMessage && chatRoomData.lastMessage.senderId === currentUser.uid) {
-             const originalLastMessage = messages.find(m => m.id === messageId); 
-             let oldLastMessageText = originalLastMessage?.text;
-             if (!oldLastMessageText && originalLastMessage?.imageUrl) oldLastMessageText = "[Image]";
-
-             if (originalLastMessage && (chatRoomData.lastMessage.text === oldLastMessageText || chatRoomData.lastMessage.imageUrl === originalLastMessage.imageUrl )) {
+             const originalLastMessageText = originalMessage?.text || (originalMessage?.imageUrl ? "[Image]" : "");
+             if (chatRoomData.lastMessage.text === originalLastMessageText || chatRoomData.lastMessage.imageUrl === originalMessage?.imageUrl) {
                  await update(chatRoomMetaRefDb, {
                     'lastMessage/text': newText || (originalMessage.imageUrl ? "[Image]" : ""), 
                     'lastMessage/timestamp': serverTimestamp(),
