@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ReactNode } from 'react';
@@ -41,27 +42,39 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setLoading(true); // Set loading to true when auth state changes
       if (fbUser) {
         setFirebaseUser(fbUser);
-        // Fetch user profile from Firestore
         const userDocRef = doc(db, 'users', fbUser.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          setUser(userDocSnap.data() as UserProfile);
-        } else {
-          // This case might happen if user record deleted from Firestore but auth remains
-          // Or, if profile creation failed during signup. For robustness, can create one here.
-          const newUserProfile: UserProfile = {
-            uid: fbUser.uid,
-            email: fbUser.email,
-            displayName: fbUser.displayName || fbUser.email,
-          };
-          await setDoc(userDocRef, newUserProfile);
-          setUser(newUserProfile);
+        try {
+          console.log(`AuthProvider: Attempting to fetch profile for UID: ${fbUser.uid}`);
+          const userDocSnap = await getDoc(userDocRef); // This is around line 67
+          if (userDocSnap.exists()) {
+            setUser(userDocSnap.data() as UserProfile);
+            console.log(`AuthProvider: Profile found for UID: ${fbUser.uid}`, userDocSnap.data());
+          } else {
+            console.log(`AuthProvider: No profile found for UID: ${fbUser.uid}. Creating one.`);
+            const newUserProfile: UserProfile = {
+              uid: fbUser.uid,
+              email: fbUser.email,
+              displayName: fbUser.displayName || fbUser.email,
+              photoURL: fbUser.photoURL
+            };
+            await setDoc(userDocRef, newUserProfile);
+            setUser(newUserProfile);
+            console.log(`AuthProvider: Profile created for UID: ${fbUser.uid}`, newUserProfile);
+          }
+        } catch (error: any) {
+          console.error(`AuthProvider: Error fetching/creating user profile for UID: ${fbUser.uid}`, error);
+          if (error.message && error.message.includes("client is offline")) {
+            console.error("AuthProvider: Critical - Firestore client is offline. User profile cannot be fetched or created. User experience will be degraded.");
+          }
+          setUser(null); // Set user to null if profile fetch fails
         }
       } else {
         setFirebaseUser(null);
         setUser(null);
+        console.log("AuthProvider: No Firebase user authenticated.");
       }
       setLoading(false);
     });
@@ -77,9 +90,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         uid: userCredential.user.uid,
         email: userCredential.user.email,
         displayName: displayName || userCredential.user.email,
+        photoURL: userCredential.user.photoURL,
       };
       await setDoc(doc(db, 'users', userCredential.user.uid), newUserProfile);
-      setUser(newUserProfile); // Optimistically set user
+      // setUser(newUserProfile); // onAuthStateChanged will handle this
+      console.log("AuthProvider: Signup successful, profile created in Firestore.");
     }
   };
 
@@ -87,11 +102,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const { email, password } = data;
     await signInWithEmailAndPassword(auth, email, password);
     // onAuthStateChanged will handle setting the user
+    console.log("AuthProvider: Login successful.");
   };
 
   const logOut = async () => {
     await firebaseSignOut(auth);
     // onAuthStateChanged will handle setting user to null
+    console.log("AuthProvider: Logout successful.");
   };
 
   const sendPasswordResetEmail = async (email: string) => {
