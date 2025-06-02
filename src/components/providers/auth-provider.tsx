@@ -2,7 +2,7 @@
 "use client";
 
 import type { ReactNode } from 'react';
-import React, { createContext, useEffect, useState } from 'react';
+import React, { createContext, useEffect, useState, useCallback } from 'react';
 import { 
   onAuthStateChanged, 
   User as FirebaseUserType, 
@@ -27,6 +27,7 @@ export interface AuthContextType {
   logIn: (data: LoginFormInputs) => Promise<void>;
   logOut: () => Promise<void>;
   sendPasswordResetEmail: (email: string) => Promise<void>;
+  retryFetchProfile: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -40,36 +41,47 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchUserProfile = useCallback(async (fbUser: FirebaseUserType) => {
+    if (!fbUser) return;
+    const userDocRef = doc(db, 'users', fbUser.uid);
+    try {
+      console.log(`AuthProvider: Attempting to fetch profile for UID: ${fbUser.uid}`);
+      const userDocSnap = await getDoc(userDocRef);
+      if (userDocSnap.exists()) {
+        setUser(userDocSnap.data() as UserProfile);
+        console.log(`AuthProvider: Profile found for UID: ${fbUser.uid}`, userDocSnap.data());
+      } else {
+        console.log(`AuthProvider: No profile found for UID: ${fbUser.uid}. Creating one.`);
+        const newUserProfile: UserProfile = {
+          uid: fbUser.uid,
+          email: fbUser.email,
+          displayName: fbUser.displayName || fbUser.email,
+          photoURL: fbUser.photoURL
+        };
+        await setDoc(userDocRef, newUserProfile);
+        setUser(newUserProfile);
+        console.log(`AuthProvider: Profile created for UID: ${fbUser.uid}`, newUserProfile);
+      }
+    } catch (error: any) {
+      console.error(`AuthProvider: Error fetching/creating user profile for UID: ${fbUser.uid}`, error);
+      if (error.message && error.message.includes("client is offline")) {
+        console.error("AuthProvider: Critical - Firestore client is offline. User profile cannot be fetched or created. User experience will be degraded.");
+      }
+      setUser(null); // Set user to null if profile fetch fails
+      throw error; // Re-throw to indicate failure
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      setLoading(true); // Set loading to true when auth state changes
+      setLoading(true);
       if (fbUser) {
         setFirebaseUser(fbUser);
-        const userDocRef = doc(db, 'users', fbUser.uid);
         try {
-          console.log(`AuthProvider: Attempting to fetch profile for UID: ${fbUser.uid}`);
-          const userDocSnap = await getDoc(userDocRef); // This is around line 67
-          if (userDocSnap.exists()) {
-            setUser(userDocSnap.data() as UserProfile);
-            console.log(`AuthProvider: Profile found for UID: ${fbUser.uid}`, userDocSnap.data());
-          } else {
-            console.log(`AuthProvider: No profile found for UID: ${fbUser.uid}. Creating one.`);
-            const newUserProfile: UserProfile = {
-              uid: fbUser.uid,
-              email: fbUser.email,
-              displayName: fbUser.displayName || fbUser.email,
-              photoURL: fbUser.photoURL
-            };
-            await setDoc(userDocRef, newUserProfile);
-            setUser(newUserProfile);
-            console.log(`AuthProvider: Profile created for UID: ${fbUser.uid}`, newUserProfile);
-          }
-        } catch (error: any) {
-          console.error(`AuthProvider: Error fetching/creating user profile for UID: ${fbUser.uid}`, error);
-          if (error.message && error.message.includes("client is offline")) {
-            console.error("AuthProvider: Critical - Firestore client is offline. User profile cannot be fetched or created. User experience will be degraded.");
-          }
-          setUser(null); // Set user to null if profile fetch fails
+          await fetchUserProfile(fbUser);
+        } catch (error) {
+          // Error is already logged in fetchUserProfile
+          // setUser(null) is also handled there.
         }
       } else {
         setFirebaseUser(null);
@@ -79,7 +91,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [fetchUserProfile]);
 
   const signUp = async (data: SignupFormInputs) => {
     const { email, password, displayName } = data;
@@ -93,7 +105,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         photoURL: userCredential.user.photoURL,
       };
       await setDoc(doc(db, 'users', userCredential.user.uid), newUserProfile);
-      // setUser(newUserProfile); // onAuthStateChanged will handle this
+      // onAuthStateChanged will handle setting the user and fetching the profile
       console.log("AuthProvider: Signup successful, profile created in Firestore.");
     }
   };
@@ -101,7 +113,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const logIn = async (data: LoginFormInputs) => {
     const { email, password } = data;
     await signInWithEmailAndPassword(auth, email, password);
-    // onAuthStateChanged will handle setting the user
+    // onAuthStateChanged will handle setting the user and fetching profile
     console.log("AuthProvider: Login successful.");
   };
 
@@ -114,8 +126,23 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const sendPasswordResetEmail = async (email: string) => {
     await firebaseSendPasswordResetEmail(auth, email);
   };
+
+  const retryFetchProfile = async () => {
+    if (firebaseUser) {
+      setLoading(true);
+      try {
+        await fetchUserProfile(firebaseUser);
+      } catch (error) {
+        // Error is logged by fetchUserProfile
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      console.log("AuthProvider: Cannot retry profile fetch, no Firebase user authenticated.");
+    }
+  };
   
-  const value = { user, firebaseUser, loading, signUp, logIn, logOut, sendPasswordResetEmail };
+  const value = { user, firebaseUser, loading, signUp, logIn, logOut, sendPasswordResetEmail, retryFetchProfile };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
