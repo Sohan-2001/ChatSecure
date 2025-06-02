@@ -31,13 +31,16 @@ export function UserSearchAndList({ onUserSelect }: UserSearchAndListProps) {
     console.log('UserSearchAndList: Current user:', currentUser);
     setLoading(true);
     const usersCol = collection(db, 'users');
-    // Fetch all users except the current user, order by email
-    const q = query(usersCol, where('uid', '!=', currentUser.uid), orderBy('email'));
+    // Fetch all users, order by email. Current user will be filtered out client-side.
+    const q = query(usersCol, orderBy('email'));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       console.log('UserSearchAndList: Snapshot received, docs count:', snapshot.docs.length);
-      const usersData = snapshot.docs.map(doc => doc.data() as UserProfile);
-      console.log('UserSearchAndList: Fetched users data:', usersData);
+      const usersData = snapshot.docs
+        .map(doc => doc.data() as UserProfile)
+        .filter(userToList => userToList.uid !== currentUser.uid); // Filter out current user
+      
+      console.log('UserSearchAndList: Fetched and filtered users data:', usersData);
       setAllUsers(usersData);
       setLoading(false);
     }, (error) => {
