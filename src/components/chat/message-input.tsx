@@ -7,16 +7,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { SendHorizonal, Loader2, Paperclip, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { moderateMessage } from "@/ai/flows/moderate-message";
-import Image from "next/image";
+import NextImage from "next/image"; // Renamed to avoid conflict with DOM Image
 
 interface MessageInputProps {
-  onSendMessage: (text: string, file?: File | null) => Promise<void>;
+  onSendMessage: (text: string, imageDataUrl?: string | null) => Promise<void>;
 }
 
 export function MessageInput({ onSendMessage }: MessageInputProps) {
   const [messageText, setMessageText] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [selectedImageDataUrl, setSelectedImageDataUrl] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const { toast } = useToast();
   const [currentMaxHeight, setCurrentMaxHeight] = useState(120);
@@ -33,39 +32,30 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
     return () => window.removeEventListener('resize', updateMaxHeight);
   }, []);
 
-  useEffect(() => {
-    if (selectedFile) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreviewUrl(reader.result as string);
-      };
-      reader.readAsDataURL(selectedFile);
-    } else {
-      setImagePreviewUrl(null);
-    }
-  }, [selectedFile]);
-
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith("image/")) {
-      setSelectedFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedImageDataUrl(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     } else if (file) {
       toast({ variant: "destructive", title: "Invalid File Type", description: "Please select an image file." });
-      setSelectedFile(null);
+      setSelectedImageDataUrl(null);
     }
   };
 
   const removeSelectedFile = () => {
-    setSelectedFile(null);
-    setImagePreviewUrl(null);
+    setSelectedImageDataUrl(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = ""; 
+      fileInputRef.current.value = "";
     }
   };
 
   const handleSendMessageInternal = async () => {
     const trimmedText = messageText.trim();
-    if (!trimmedText && !selectedFile) return;
+    if (!trimmedText && !selectedImageDataUrl) return;
 
     setIsSending(true);
     try {
@@ -81,11 +71,11 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
           return;
         }
       }
-      
-      await onSendMessage(trimmedText, selectedFile);
+
+      await onSendMessage(trimmedText, selectedImageDataUrl);
       setMessageText("");
       removeSelectedFile();
-      
+
       const textarea = document.querySelector('textarea[placeholder="Type your message..."]');
       if (textarea) {
         (textarea as HTMLTextAreaElement).style.height = 'auto';
@@ -111,9 +101,9 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
 
   return (
     <div className="border-t bg-card p-2 sm:p-3 md:p-4">
-      {imagePreviewUrl && (
+      {selectedImageDataUrl && (
         <div className="mb-2 relative w-24 h-24 border rounded-md overflow-hidden">
-          <Image src={imagePreviewUrl} alt="Preview" layout="fill" objectFit="cover" />
+          <NextImage src={selectedImageDataUrl} alt="Preview" fill style={{ objectFit: "cover" }} unoptimized={true} />
           <Button
             variant="ghost"
             size="icon"
@@ -158,7 +148,7 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
         />
         <Button
           onClick={handleSendMessageInternal}
-          disabled={isSending || (!messageText.trim() && !selectedFile)}
+          disabled={isSending || (!messageText.trim() && !selectedImageDataUrl)}
           size="icon"
           className="h-10 w-10 rounded-full shrink-0"
           aria-label="Send message"

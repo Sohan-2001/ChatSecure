@@ -172,14 +172,14 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
               {message.imageUrl && (
                 <div className="relative aspect-video max-w-xs h-auto rounded-md overflow-hidden mb-1">
                   <NextImage
-                    src={message.imageUrl}
+                    src={message.imageUrl} // This will now be a Base64 Data URL
                     alt="Sent image"
                     fill
                     style={{ objectFit: 'contain' }}
                     className="bg-muted"
                     data-ai-hint="chat image"
-                    unoptimized={message.imageUrl.endsWith('.gif')} // Example for unoptimized, adjust if needed
-                    priority={false} // Consider if images are critical for LCP
+                    unoptimized={true} // Important for Data URLs
+                    priority={false}
                   />
                 </div>
               )}
@@ -232,5 +232,3 @@ export function MessageItem({ message, isCurrentUserMessage, senderProfile, onDe
     </div>
   );
 }
-
-    
