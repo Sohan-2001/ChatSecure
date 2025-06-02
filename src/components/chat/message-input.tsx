@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SendHorizonal, Loader2 } from "lucide-react";
@@ -15,6 +15,18 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
   const [messageText, setMessageText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const { toast } = useToast();
+  const [currentMaxHeight, setCurrentMaxHeight] = useState(120);
+
+  useEffect(() => {
+    const updateMaxHeight = () => {
+      const newMaxHeight = window.innerWidth >= 768 ? 200 : 120; // md breakpoint (768px)
+      setCurrentMaxHeight(newMaxHeight);
+    };
+
+    updateMaxHeight(); // Set initial value
+    window.addEventListener('resize', updateMaxHeight);
+    return () => window.removeEventListener('resize', updateMaxHeight);
+  }, []);
 
   const handleSendMessage = async () => {
     if (!messageText.trim()) return;
@@ -27,6 +39,11 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
       if (moderationResult.isSafe) {
         await onSendMessage(messageText.trim());
         setMessageText("");
+        // Manually reset textarea height after sending if needed, though it should clear with messageText
+        const textarea = document.querySelector('textarea[placeholder="Type your message..."]');
+        if (textarea) {
+          (textarea as HTMLTextAreaElement).style.height = 'auto'; // Or back to initial min-height
+        }
       } else {
         toast({
           variant: "destructive",
@@ -54,18 +71,17 @@ export function MessageInput({ onSendMessage }: MessageInputProps) {
   };
 
   return (
-    <div className="flex items-start gap-2 border-t bg-card p-4">
+    <div className="flex items-start gap-2 border-t bg-card p-2 sm:p-3 md:p-4">
       <Textarea
         value={messageText}
         onChange={(e) => setMessageText(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Type your message..."
         className="flex-1 resize-none rounded-xl border-input focus-visible:ring-1 focus-visible:ring-ring"
-        rows={1}
         onInput={(e) => {
           const target = e.target as HTMLTextAreaElement;
-          target.style.height = 'auto';
-          target.style.height = `${Math.min(target.scrollHeight, 120)}px`; // Max height ~5 lines
+          target.style.height = 'auto'; // Reset height to correctly calculate scrollHeight
+          target.style.height = `${Math.min(target.scrollHeight, currentMaxHeight)}px`;
         }}
         disabled={isSending}
       />
