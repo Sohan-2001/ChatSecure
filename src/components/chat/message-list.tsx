@@ -28,17 +28,27 @@ export function MessageList({ messages, contactUser, loadingMessages, onDeleteMe
   }, [messages]);
 
   if (loadingMessages) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+return (
+      <div className="space-y-4 p-4 sm:p-6">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className={`flex items-end gap-2 ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
+            {i % 2 === 0 && <Skeleton className="h-8 w-8 rounded-full" />}
+            <Skeleton className="h-12 w-48 rounded-lg" />
+            {i % 2 !== 0 && <Skeleton className="h-8 w-8 rounded-full" />}
+          </div>
+        ))}
       </div>
     );
   }
 
-  if (!messages || messages.length === 0) {
+  
+
+   // Empty State
+  if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <p className="text-muted-foreground">No messages yet. Start the conversation!</p>
+      <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">
+        <p className="text-lg font-medium">No messages yet.</p>
+        <p className="text-sm">Start the conversation by sending a message below.</p>
       </div>
     );
   }
