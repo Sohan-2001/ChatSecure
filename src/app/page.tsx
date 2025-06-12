@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/use-auth'; // Assuming you still need user data
 import { SidebarProvider, Sidebar, SidebarInset, SidebarHeader, SidebarContent, SidebarFooter } from "@/components/ui/sidebar";
 import { MessageList } from "@/components/chat/message-list"; // Assuming this path
 import { MessageInput } from "@/components/chat/message-input"; // Assuming you have this
-import { UserList } from "@/components/chat/user-list"; // Assuming you have this
+import { UserList } from "@/components/chat/user-search-and-list"; // Assuming you have this
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
